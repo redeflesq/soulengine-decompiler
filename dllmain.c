@@ -5,8 +5,6 @@
 
 #include "minhook/include/MinHook.h"
 
-#define DEBUG
-
 #ifdef DEBUG
 FILE* cfile;
 #define LG(s, ...) fprintf(cfile, s "\n", __VA_ARGS__)
@@ -16,13 +14,6 @@ FILE* cfile;
 
 /* Zend Header { */
 
-#define TSRMLS_D void ***tsrm_ls
-#define TSRMLS_DC , TSRMLS_D
-#define TSRMLS_C tsrm_ls
-#define TSRMLS_CC , TSRMLS_C
-
-typedef BOOL zend_bool;
-typedef unsigned char zend_uchar;
 typedef unsigned long zend_ulong;
 
 typedef struct _zend_refcounted_h {
@@ -44,17 +35,6 @@ typedef struct {
 } _zend_string;
 
 typedef _zend_string zend_string;
-
-#define ZSTR_VAL(zstr) (zstr)->val
-#define ZSTR_LEN(zstr) (zstr)->len
-#define ZSTR_H(zstr) (zstr)->h
-#define ZSTR_HASH(zstr) zend_string_hash_val(zstr)
-
-#define Z_STR(zval)	(zval).value.str
-#define Z_STR_P(zval_p)	Z_STR(*(zval_p))
-
-#define Z_STRVAL(zval) ZSTR_VAL(Z_STR(zval))
-#define Z_STRVAL_P(zval_p) Z_STRVAL(*(zval_p))
 
 #define ZEND_ENDIAN_LOHI_3(lo, mi, hi) lo; mi; hi;
 
@@ -104,12 +84,6 @@ typedef struct _zval_struct {
 		uint32_t extra; /* not further specified */
 	} u2;
 } zval;
-
-enum RESULT_CODE
-{
-	RC_SUCCESS = 0,
-	RC_FAILURE = -1
-};
 
 typedef enum {
 	SUCCESS = 0,
@@ -179,7 +153,7 @@ typedef int (__cdecl* pCompileString)(zval* a1, char* Src, DWORD* a3);
 FARPROC dwCompileString = NULL;
 pCompileString fpCompileString = NULL;
 
-int __cdecl DetourCompileString(zval* a1, char* Src, DWORD* a3)
+int __cdecl DetourCompileString(zval* a1, char* Src, DWORD* a3) 
 {
 	zend_string* str = a1->value.str;
 	size_t len = strlen(str->val) + 16;
@@ -221,9 +195,7 @@ int __cdecl DetourCompileString(zval* a1, char* Src, DWORD* a3)
 			LG("Unable to create file");
 		}
 	}
-	//if (MessageBoxA(0, Src, "Compile it?", MB_OKCANCEL) == IDCANCEL) {
-	//	return 0;
-	//}
+
 	return fpCompileString(a1, Src, a3);
 }
 
@@ -231,34 +203,28 @@ void main()
 {
 	if (MH_Initialize() != MH_OK) {
 		LG("MH Initialize error");
-	} 
-	else
-	{
-		LG("CompileString create hook");
-		if (CreateHook(dwCompileString, &DetourCompileString, (void**)&fpCompileString) != 0) {
-			ExitProcess(RC_FAILURE);
-		}
 
+		ExitProcess(EXIT_FAILURE);
+	} 
+	else {
+		LG("CompileString create hook");
+
+		if (CreateHook(dwCompileString, &DetourCompileString, (void**)&fpCompileString) != 0)
+			ExitProcess(EXIT_FAILURE);
+		
 		while (TRUE) {
 			if (GetAsyncKeyState(VK_END) & 1) {
 				break;
 			}
 		}
 
-		LG("CompileString remove hook");
-		if (RemoveHook(dwCompileString) != 0) {
-			ExitProcess(RC_FAILURE);
-		}
+		LG("CompileString remove hook & uninitialize minhook");
 
-		if (MH_Uninitialize() != MH_OK) {
-			LG("MH uninitialize error");
-			ExitProcess(RC_FAILURE);
-		}
-
-		ExitProcess(RC_SUCCESS);
+		if (RemoveHook(dwCompileString) != 0 || MH_Uninitialize() != MH_OK)
+			ExitProcess(EXIT_FAILURE);
+		
+		ExitProcess(EXIT_SUCCESS);
 	}
-
-	ExitProcess(RC_FAILURE);
 }
 
 BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID unk)
@@ -273,7 +239,7 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID unk)
 		AllocConsole();
 		freopen_s(&cfile, "CONOUT$", "w", stdout);
 		if (!cfile && MessageBoxA(0, "Unable to open handle for console. Continue?", "SoulEngine Decompiler", MB_OKCANCEL | MB_ICONWARNING) == IDCANCEL) {
-			ExitProcess(RC_FAILURE);
+			ExitProcess(EXIT_FAILURE);
 		}
 #endif
 
@@ -282,28 +248,22 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID unk)
 		if (!php5ts)
 			php5ts = LoadLibraryA("php5ts.dll");
 
-		if (php5ts)
-		{
+		if (php5ts) {
 			dwCompileString = GetProcAddress(php5ts, "compile_string");
 
-			if (dwCompileString)
-			{
+			if (dwCompileString) {
 				CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)main, NULL, 0, NULL);
 				start = TRUE;
 			}
-			else {
-				LG("Proc 'compile_string' not found");
-			}
+			else LG("Proc 'compile_string' not found");
 		}
-		else {
-			LG("Handle of php5ts.dll not found");
-		}
-
+		else LG("Handle of php5ts.dll not found");
+		
 		CloseHandle(hModule);
 	}
 
 	if (!start)
-		ExitProcess(RC_FAILURE);
+		ExitProcess(EXIT_FAILURE);
 	
 	return TRUE;
 }
