@@ -1,5 +1,5 @@
 # soulengine-decompiler
-Decompiler for all programs based on the Source Engine. Although, it would be more accurate to call him a "source code stealer"  
+Decompiler for all programs based on the [SoulEngine](https://github.com/dim-s/soulengine). Although, it would be more accurate to call him a "source code stealer"  
 
 ### How it works
 After injection, the zend *compile_string* function is hooked, which is necessary for any eval construct in PHP, and in soulengine any event or action uses the eval construct.  
@@ -11,4 +11,4 @@ It doesn't matter which library is used, any library can be used
 
 ### Recommended injector
 Any dll injector will work. But for it to work correctly, you need to suspend the process before injection, because all the code is recognized at runtime.  
-Personally, I recommend my [process-injector](https://github.com/redeflesq/SPInjector)
+Personally, I recommend my [process-injector](https://github.com/redeflesq/suspend-process-injector)
