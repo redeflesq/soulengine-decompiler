@@ -12,8 +12,8 @@
 #endif
 
 #ifdef DEBUG
-FILE* cfile;
-#define LG(s, ...) fprintf(cfile, s "\n", __VA_ARGS__)
+FILE* hStdout;
+#define LG(s, ...) fprintf(hStdout, s "\n", __VA_ARGS__)
 #else
 #define LG(s, ...) ((void)NULL)
 #endif
@@ -149,15 +149,26 @@ plink_hash_t phFile = NULL;
 
 XXH64_hash_t xxhJunkHashes[] = {
 	/* Devel Studio 3.0 beta 2 */
-	0x450a2bda, 0x9ff33dc8, 0x5d23bc0b, 0x5b5b6429
+	0x450a2bda, 0x9ff33dc8, 0x5d23bc0b, 0x5b5b6429,
+
+	/* Devel Studio 2010 */
+	0x7c8e49af
 };
 
 const char szPhpModuleName[] = "php5ts.dll";
 
 typedef int (__cdecl* pCompileString)(zval* a1, char* Src, DWORD* a3);
+typedef FARPROC
+(WINAPI* pGetProcAddress)(
+	_In_ HMODULE hModule,
+	_In_ LPCSTR lpProcName
+);
 
-FARPROC dwCompileString = NULL;
+volatile FARPROC dwCompileString = NULL;
 pCompileString fpCompileString = NULL;
+
+FARPROC dwGetProcAddress = NULL;
+pGetProcAddress fpGetProcAddress = NULL;
 
 int __cdecl DetourCompileString(zval* a1, char* Src, DWORD* a3) 
 {
@@ -194,8 +205,6 @@ int __cdecl DetourCompileString(zval* a1, char* Src, DWORD* a3)
 				strcat(szOutputFilePath, ".php");
 			}
 
-			BOOL bCodeAlreadyStealedByFile = FALSE;
-
 			WIN32_FILE_ATTRIBUTE_DATA fad;
 			if (!GetFileAttributesExA(szOutputFilePath, GetFileExInfoStandard, &fad)) {
 				FILE* hFile = fopen(szOutputFilePath, "w+");
@@ -224,102 +233,119 @@ int __cdecl DetourCompileString(zval* a1, char* Src, DWORD* a3)
 						/* ---- */
 
 						size_t iFileWritten = 0;
-						if ((iFileWritten = fwrite(szPhpCode, iPhpCodeLength, 1, hFile)) != iPhpCodeLength) {
+						if ((iFileWritten = fwrite(szPhpCode, sizeof(char), iPhpCodeLength, hFile)) != iPhpCodeLength) {
 							LG("[0x%.8x] Write file failure, %d != %d", (UINT)XxhPhpCodeHash, iFileWritten, iPhpCodeLength);
 						}
-						else {
-							LG("[0x%.8x] Sucessful stealed eval'd code '%s' %d bytes", (UINT)XxhPhpCodeHash, szOutputFilePath, iFileWritten);
-						}
+						else LG("[0x%.8x] Sucessful stealed eval'd code '%s' %d bytes", (UINT)XxhPhpCodeHash, szOutputFilePath, iFileWritten);
 					}
-					else {
-						LG("[0x%.8x] Already stealed", (UINT)XxhPhpCodeHash);
-					}
+					else LG("[0x%.8x] Already stealed", (UINT)XxhPhpCodeHash);
 
 					fclose(hFile);
 				}
-				else {
-					LG("[0x%.8x] Unable to create file", (UINT)XxhPhpCodeHash);
-				}
-			} else LG("[0x%.8x] File with code already exist. '%s' %d bytes", (UINT)XxhPhpCodeHash, szOutputFilePath, iPhpCodeLength);
+				else LG("[0x%.8x] Unable to create file", (UINT)XxhPhpCodeHash);
+			}
+			else LG("[0x%.8x] File with code already exist. '%s' %d bytes", (UINT)XxhPhpCodeHash, szOutputFilePath, iPhpCodeLength);
 
 			free(szOutputFilePath);
 		}
-		else {
-			LG("[0x%.8x] Is junk code", (UINT)XxhPhpCodeHash);
-		}
+		else LG("[0x%.8x] Is junk code", (UINT)XxhPhpCodeHash);
 	}
 
 	return fpCompileString(a1, Src, a3);
 }
 
-void main()
+FARPROC
+WINAPI DetourGetProcAddress(
+	_In_ HMODULE hModule,
+	_In_ LPCSTR lpProcName
+)
 {
-	if (MH_Initialize() != MH_OK)
-		LG("MH Initialize error"), ExitProcess(EXIT_FAILURE);
-	else {
-		LG("CompileString create hook");
+	FARPROC pFunction = fpGetProcAddress(hModule, lpProcName);
 
-		if (CreateHook(dwCompileString, &DetourCompileString, (void**)&fpCompileString) != 0)
-			ExitProcess(EXIT_FAILURE);
-		
-		while (TRUE) {
-			if (GetAsyncKeyState(VK_END) & 1)
-				break;
-		}
+	if (strcmp(lpProcName, "compile_string") == 0)
+		dwCompileString = pFunction,
+		LG("dwCompileString finded! -> 0x%p", pFunction);
 
-		LG("CompileString remove hook & uninitialize minhook");
+	return pFunction;
+}
 
-		if (RemoveHook(dwCompileString) != 0 || MH_Uninitialize() != MH_OK)
-			LG("Unable to remove hook or MH Uninitialize error"), ExitProcess(EXIT_FAILURE);
+void main(HMODULE hPhpModule)
+{
+	if (hPhpModule) {
+		dwCompileString = GetProcAddress(hPhpModule, "compile_string");
+	}
+	else while (dwCompileString == NULL);
 
-		/* free all saved hashes */
-		plink_hash_t phCurrent = phFile;
-		while (phCurrent != NULL) {
-			plink_hash_t phBefore = phCurrent->before;
-			free(phCurrent);
-			phCurrent = phBefore;
-		}
-		/* ---- */
+	if (dwCompileString && dwGetProcAddress) 
+		LG("GetProcAddress hook removed"), RemoveHook(dwGetProcAddress);
+
+	LG("CompileString(0x%p) create hook", dwCompileString);
+
+	if (CreateHook(dwCompileString, &DetourCompileString, (void**)&fpCompileString) != 0)
+		ExitProcess(EXIT_FAILURE);
+
+	while (TRUE) {
+		if (GetAsyncKeyState(VK_END) & 1)
+			break;
+	}
+
+	LG("CompileString remove hook & uninitialize minhook");
+
+	if (RemoveHook(dwCompileString) != 0 || MH_Uninitialize() != MH_OK)
+		LG("Unable to remove hook or MH Uninitialize error"), ExitProcess(EXIT_FAILURE);
+
+	/* free all saved hashes */
+	plink_hash_t phCurrent = phFile;
+	while (phCurrent != NULL) {
+		plink_hash_t phBefore = phCurrent->before;
+		free(phCurrent);
+		phCurrent = phBefore;
+	}
+	/* ---- */
 
 #ifdef DEBUG
-		FreeConsole();
+	FreeConsole();
 #endif
-		ExitProcess(EXIT_SUCCESS);
-	}
+	ExitProcess(EXIT_SUCCESS);
 }
 
 BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID unk)
 {
 	if (ul_reason_for_call == DLL_PROCESS_ATTACH)
 	{
-		BOOL bThreadStarted = FALSE;
-
 		DisableThreadLibraryCalls(hModule);
 
 #ifdef DEBUG
 		if (AllocConsole()) {
-			freopen_s(&cfile, "CONOUT$", "w", stdout);
-			if (!cfile && MessageBoxA(0, "Unable to open file handle for console. Continue?", "SoulEngine Decompiler", MB_OKCANCEL | MB_ICONWARNING) == IDCANCEL)
+			freopen_s(&hStdout, "CONOUT$", "w", stdout);
+			if (!hStdout && MessageBoxA(0, "Unable to open file handle for console. Continue?", "SoulEngine Decompiler", MB_OKCANCEL | MB_ICONWARNING) == IDCANCEL)
 				ExitProcess(EXIT_FAILURE);
 		}
 		else if (MessageBoxA(0, "Unable to allocate console. Continue?", "SoulEngine Decompiler", MB_OKCANCEL | MB_ICONWARNING) == IDCANCEL)
 			ExitProcess(EXIT_FAILURE);
 #endif
+
+		if(MH_Initialize() != MH_OK)
+			LG("MH Initialize error"), ExitProcess(EXIT_FAILURE);
+
 		HMODULE hPhpModule = GetModuleHandleA(szPhpModuleName);
 
-		if (!hPhpModule)
+		if (!hPhpModule) {
 			hPhpModule = LoadLibraryA(szPhpModuleName);
 
-		if (hPhpModule) {
-			dwCompileString = GetProcAddress(hPhpModule, "compile_string");
+			if (!hPhpModule) {
+				LG("Handle of %s not found", szPhpModuleName);
 
-			if (dwCompileString && CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)main, NULL, 0, NULL) != NULL)
-				bThreadStarted = TRUE;
-			else LG("Proc 'compile_string' not found");
+				dwGetProcAddress = GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetProcAddress");
+
+				LG("GetProcAddress(0x%p) create hook", dwGetProcAddress);
+
+				if (CreateHook(dwGetProcAddress, &DetourGetProcAddress, (void**)&fpGetProcAddress) != 0)
+					ExitProcess(EXIT_FAILURE);
+			}
 		}
-		else LG("Handle of %s not found", szPhpModuleName);
 
-		if (!bThreadStarted)
+		if (CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)main, hPhpModule, 0, NULL) == NULL)
 			ExitProcess(EXIT_FAILURE);
 
 		CloseHandle(hModule);
