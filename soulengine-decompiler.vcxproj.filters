@@ -13,51 +13,69 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
     </Filter>
+    <Filter Include="Header Files\minhook">
+      <UniqueIdentifier>{3993580f-6947-4bf9-a415-04a35f328479}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\minhook">
+      <UniqueIdentifier>{b0c52c8f-65cb-4554-912d-17b516f70442}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\xxhash">
+      <UniqueIdentifier>{5f454db2-96a3-4833-a86b-a95c39324a2d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\xxhash">
+      <UniqueIdentifier>{cbfbccaa-d1f2-4452-a499-554b2a998eea}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="minhook\src\buffer.c">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="minhook\src\trampoline.c">
+      <Filter>Source Files\minhook</Filter>
     </ClCompile>
     <ClCompile Include="minhook\src\hook.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="minhook\src\trampoline.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="minhook\src\hde\hde32.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\minhook</Filter>
     </ClCompile>
     <ClCompile Include="minhook\src\hde\hde64.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\minhook</Filter>
+    </ClCompile>
+    <ClCompile Include="minhook\src\hde\hde32.c">
+      <Filter>Source Files\minhook</Filter>
+    </ClCompile>
+    <ClCompile Include="minhook\src\buffer.c">
+      <Filter>Source Files\minhook</Filter>
+    </ClCompile>
+    <ClCompile Include="xxhash\xxhash.c">
+      <Filter>Source Files\xxhash</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="minhook\include\MinHook.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="minhook\src\buffer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="minhook\src\trampoline.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="minhook\src\hde\hde32.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="minhook\src\hde\hde64.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="minhook\src\hde\pstdint.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\minhook</Filter>
     </ClInclude>
     <ClInclude Include="minhook\src\hde\table32.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\minhook</Filter>
     </ClInclude>
     <ClInclude Include="minhook\src\hde\table64.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\minhook</Filter>
+    </ClInclude>
+    <ClInclude Include="minhook\src\hde\pstdint.h">
+      <Filter>Header Files\minhook</Filter>
+    </ClInclude>
+    <ClInclude Include="minhook\src\hde\hde64.h">
+      <Filter>Header Files\minhook</Filter>
+    </ClInclude>
+    <ClInclude Include="minhook\src\hde\hde32.h">
+      <Filter>Header Files\minhook</Filter>
+    </ClInclude>
+    <ClInclude Include="minhook\src\buffer.h">
+      <Filter>Header Files\minhook</Filter>
+    </ClInclude>
+    <ClInclude Include="xxhash\xxhash.h">
+      <Filter>Header Files\xxhash</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

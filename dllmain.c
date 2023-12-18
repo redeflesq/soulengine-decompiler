@@ -5,6 +5,8 @@
 
 #include "minhook/include/MinHook.h"
 
+#include "xxhash/xxhash.h"
+
 #ifdef DEBUG
 FILE* cfile;
 #define LG(s, ...) fprintf(cfile, s "\n", __VA_ARGS__)
@@ -130,23 +132,18 @@ static int RemoveHook(void* target)
 
 /* } MinHook */
 
-/* Utils { */
+/* XXHash { */
 
-static char* RandString(char* str, size_t size)
-{
-	const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJK";
-	if (size) {
-		--size;
-		for (size_t n = 0; n < size; n++) {
-			int key = rand() % (int)(sizeof charset - 1);
-			str[n] = charset[key];
-		}
-		str[size] = '\0';
-	}
-	return str;
-}
+typedef struct link_hash_t {
+	XXH64_hash_t hash;
+	struct link_hash_t* before, * next;
+} link_hash_t, * plink_hash_t;
 
-/* } Utils */
+plink_hash_t phFile = NULL;
+
+/* } XXHash */
+
+const char szPhpModuleName[] = "php5ts.dll";
 
 typedef int (__cdecl* pCompileString)(zval* a1, char* Src, DWORD* a3);
 
@@ -155,45 +152,75 @@ pCompileString fpCompileString = NULL;
 
 int __cdecl DetourCompileString(zval* a1, char* Src, DWORD* a3) 
 {
-	zend_string* str = a1->value.str;
-	size_t len = strlen(str->val) + 16;
+	zend_string* pZStrPhpCode = a1->value.str;
 
 	if (strstr(Src, "eval()'d code")) {
+		size_t iPhpCodeLength = strlen(pZStrPhpCode->val) + 0x10;
+		const char* szPhpCode = ((char*)pZStrPhpCode->val) - 0x10;
+		XXH64_hash_t XxhPhpCodeHash = XXH3_64bits(szPhpCode, iPhpCodeLength);
 
-		srand((unsigned int)a1 + len);
+		char* szOutputFilePath = malloc(MAX_PATH * sizeof(char));
+		{
+			GetModuleFileNameA(NULL, szOutputFilePath, MAX_PATH); // get current file path
+			char* pFilename = strrchr(szOutputFilePath, '\\') + 1; // pointer to filename
+			char* pFileext = strrchr(pFilename, '.') + 1; // pointer to file extension
+			memset(pFileext, 0, strlen(pFileext)); // remove extension
+			*(pFileext - 1) = '_'; // replace '.' to '_'
 
-		char rand_string[6] = { 0 };
-		RandString(rand_string, sizeof rand_string);
+			char szBufferHash[sizeof(XXH64_hash_t) + 1] = { 0 };
+			_itoa_s(XxhPhpCodeHash, szBufferHash, sizeof szBufferHash, 16);
 
-		char prefix[] = { 'f', 'i', 'l', 'e', 's', '_', 0 };
-		char ext[] = { '.', 'p', 'h', 'p', 0 };
+			strcat(szOutputFilePath, szBufferHash);
+			strcat(szOutputFilePath, ".php");
+		}
 
-		char name[(sizeof prefix - 1) + sizeof rand_string + (sizeof ext - 1) + 1] = { 0 };
+		FILE* hFile = fopen(szOutputFilePath, "a+");
 
-		strcat(name, prefix);
-		memcpy(name + sizeof prefix - 1, rand_string, sizeof rand_string);
-		strcat(name, ext);
+		if (hFile) {
+			BOOL bCodeAlreadyStealed = FALSE;
 
-		FILE* fp = fopen(name, "a+");
+			/* Find code hash in list */
+			plink_hash_t phCurrent = phFile;
+			while (phCurrent != NULL) {
+				if (phCurrent->hash == XxhPhpCodeHash) {
+					bCodeAlreadyStealed = TRUE;
+					break;
+				}
+				phCurrent = phCurrent->before;
+			}
+			/* ---- */
 
-		char path[512] = { 0 };
-		GetFullPathNameA(name, sizeof path, path, NULL);
+			if (!bCodeAlreadyStealed) {
 
-		if (fp) {
-			size_t size = 0;
+				/* Create new hash of php code */
+				plink_hash_t phBefore = phFile;
+				phFile = malloc(sizeof(link_hash_t));
+				phFile->hash = XxhPhpCodeHash;
+				phFile->before = phBefore;
+				phFile->next = NULL;
+				if (phBefore != NULL)
+					phBefore->next = phFile;
+				/* ---- */
 
-			if ((size = fwrite(((char*)str->val) - 16, sizeof(char), len, fp)) != len) {
-				LG("Write file failure, %d != %d", size, len);
+				size_t iFileWritten = 0;
+				if ((iFileWritten = fwrite(szPhpCode, sizeof(char), iPhpCodeLength, hFile)) != iPhpCodeLength) {
+					LG("[0x%x] Write file failure, %d != %d", iFileWritten, iPhpCodeLength);
+				}
+				else {
+					LG("[0x%x] Sucessful write eval'd code '%s' %d bytes", szOutputFilePath, iFileWritten);
+				}
 			}
 			else {
-				LG("Sucessful write eval'd code '%s' %d bytes", path, size);
+				LG("[0x%x] Already stealed", XxhPhpCodeHash);
 			}
 
-			fclose(fp);
+			fclose(hFile);
 		}
 		else {
-			LG("Unable to create file");
+			LG("[0x%x] Unable to create file", XxhPhpCodeHash);
 		}
+
+		free(szOutputFilePath);
 	}
 
 	return fpCompileString(a1, Src, a3);
@@ -222,6 +249,13 @@ void main()
 
 		if (RemoveHook(dwCompileString) != 0 || MH_Uninitialize() != MH_OK)
 			ExitProcess(EXIT_FAILURE);
+
+		plink_hash_t phCurrent = phFile;
+		while (phCurrent != NULL) {
+			plink_hash_t phBefore = phCurrent->before;
+			free(phCurrent);
+			phCurrent = phBefore;
+		}
 		
 		ExitProcess(EXIT_SUCCESS);
 	}
@@ -229,10 +263,10 @@ void main()
 
 BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID unk)
 {
-	BOOL start = FALSE;
-
 	if (ul_reason_for_call == DLL_PROCESS_ATTACH)
 	{
+		BOOL bThreadStarted = FALSE;
+
 		DisableThreadLibraryCalls(hModule);
 		
 #ifdef DEBUG
@@ -242,28 +276,25 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID unk)
 			ExitProcess(EXIT_FAILURE);
 		}
 #endif
+		HMODULE hPhpModule = GetModuleHandleA(szPhpModuleName);
 
-		HMODULE php5ts = GetModuleHandleA("php5ts.dll");
+		if (!hPhpModule)
+			hPhpModule = LoadLibraryA(szPhpModuleName);
 
-		if (!php5ts)
-			php5ts = LoadLibraryA("php5ts.dll");
+		if (hPhpModule) {
+			dwCompileString = GetProcAddress(hPhpModule, "compile_string");
 
-		if (php5ts) {
-			dwCompileString = GetProcAddress(php5ts, "compile_string");
-
-			if (dwCompileString) {
-				CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)main, NULL, 0, NULL);
-				start = TRUE;
-			}
+			if (dwCompileString && CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)main, NULL, 0, NULL) != NULL)
+				bThreadStarted = TRUE;
 			else LG("Proc 'compile_string' not found");
 		}
-		else LG("Handle of php5ts.dll not found");
+		else LG("Handle of %s not found", szPhpModuleName);
+
+		if (!bThreadStarted)
+			ExitProcess(EXIT_FAILURE);
 		
 		CloseHandle(hModule);
 	}
 
-	if (!start)
-		ExitProcess(EXIT_FAILURE);
-	
 	return TRUE;
 }
