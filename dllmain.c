@@ -7,11 +7,15 @@
 
 #include "xxhash/xxhash.h"
 
+#ifdef _DEBUG
+#define DEBUG
+#endif
+
 #ifdef DEBUG
 FILE* cfile;
 #define LG(s, ...) fprintf(cfile, s "\n", __VA_ARGS__)
 #else
-#define LG(s, ...)
+#define LG(s, ...) ((void)NULL)
 #endif
 
 /* Zend Header { */
@@ -136,12 +140,17 @@ static int RemoveHook(void* target)
 
 typedef struct link_hash_t {
 	XXH64_hash_t hash;
-	struct link_hash_t* before, * next;
+	struct link_hash_t* before;
 } link_hash_t, * plink_hash_t;
 
 plink_hash_t phFile = NULL;
 
 /* } XXHash */
+
+XXH64_hash_t xxhJunkHashes[] = {
+	/* Devel Studio 3.0 beta 2 */
+	0x450a2bda, 0x9ff33dc8, 0x5d23bc0b, 0x5b5b6429
+};
 
 const char szPhpModuleName[] = "php5ts.dll";
 
@@ -159,68 +168,85 @@ int __cdecl DetourCompileString(zval* a1, char* Src, DWORD* a3)
 		const char* szPhpCode = ((char*)pZStrPhpCode->val) - 0x10;
 		XXH64_hash_t XxhPhpCodeHash = XXH3_64bits(szPhpCode, iPhpCodeLength);
 
-		char* szOutputFilePath = malloc(MAX_PATH * sizeof(char));
-		{
-			GetModuleFileNameA(NULL, szOutputFilePath, MAX_PATH); // get current file path
-			char* pFilename = strrchr(szOutputFilePath, '\\') + 1; // pointer to filename
-			char* pFileext = strrchr(pFilename, '.') + 1; // pointer to file extension
-			memset(pFileext, 0, strlen(pFileext)); // remove extension
-			*(pFileext - 1) = '_'; // replace '.' to '_'
+		BOOL bIsJunkCode = FALSE;
 
-			char szBufferHash[sizeof(XXH64_hash_t) + 1] = { 0 };
-			_itoa_s(XxhPhpCodeHash, szBufferHash, sizeof szBufferHash, 16);
-
-			strcat(szOutputFilePath, szBufferHash);
-			strcat(szOutputFilePath, ".php");
+		for (size_t i = 0; i < sizeof xxhJunkHashes / sizeof(XXH64_hash_t); i++) {
+			if ((UINT)xxhJunkHashes[i] == (UINT)XxhPhpCodeHash) {
+				bIsJunkCode = TRUE;
+				break;
+			}
 		}
 
-		FILE* hFile = fopen(szOutputFilePath, "a+");
+		if (!bIsJunkCode) {
 
-		if (hFile) {
-			BOOL bCodeAlreadyStealed = FALSE;
+			char* szOutputFilePath = malloc(MAX_PATH * sizeof(char));
+			{
+				GetModuleFileNameA(NULL, szOutputFilePath, MAX_PATH); // get current file path
+				char* pFilename = strrchr(szOutputFilePath, '\\') + 1; // pointer to filename
+				char* pFileext = strrchr(pFilename, '.') + 1; // pointer to file extension
+				memset(pFileext, 0, strlen(pFileext)); // remove extension
+				*(pFileext - 1) = '_'; // replace '.' to '_'
 
-			/* Find code hash in list */
-			plink_hash_t phCurrent = phFile;
-			while (phCurrent != NULL) {
-				if (phCurrent->hash == XxhPhpCodeHash) {
-					bCodeAlreadyStealed = TRUE;
-					break;
-				}
-				phCurrent = phCurrent->before;
+				char szBufferHash[sizeof(XXH64_hash_t) + 1] = { 0 };
+				_itoa_s(XxhPhpCodeHash, szBufferHash, sizeof szBufferHash, 16);
+
+				strcat(szOutputFilePath, szBufferHash);
+				strcat(szOutputFilePath, ".php");
 			}
-			/* ---- */
 
-			if (!bCodeAlreadyStealed) {
+			BOOL bCodeAlreadyStealedByFile = FALSE;
 
-				/* Create new hash of php code */
-				plink_hash_t phBefore = phFile;
-				phFile = malloc(sizeof(link_hash_t));
-				phFile->hash = XxhPhpCodeHash;
-				phFile->before = phBefore;
-				phFile->next = NULL;
-				if (phBefore != NULL)
-					phBefore->next = phFile;
-				/* ---- */
+			WIN32_FILE_ATTRIBUTE_DATA fad;
+			if (!GetFileAttributesExA(szOutputFilePath, GetFileExInfoStandard, &fad)) {
+				FILE* hFile = fopen(szOutputFilePath, "w+");
 
-				size_t iFileWritten = 0;
-				if ((iFileWritten = fwrite(szPhpCode, sizeof(char), iPhpCodeLength, hFile)) != iPhpCodeLength) {
-					LG("[0x%x] Write file failure, %d != %d", iFileWritten, iPhpCodeLength);
+				if (hFile) {
+					BOOL bCodeAlreadyStealedByHash = FALSE;
+
+					/* Find code hash in list */
+					plink_hash_t phCurrent = phFile;
+					while (phCurrent != NULL) {
+						if (phCurrent->hash == XxhPhpCodeHash) {
+							bCodeAlreadyStealedByHash = TRUE;
+							break;
+						}
+						phCurrent = phCurrent->before;
+					}
+					/* ---- */
+
+					if (!bCodeAlreadyStealedByHash) {
+
+						/* Create new hash of php code */
+						plink_hash_t phBefore = phFile;
+						phFile = malloc(sizeof(link_hash_t));
+						phFile->hash = XxhPhpCodeHash;
+						phFile->before = phBefore;
+						/* ---- */
+
+						size_t iFileWritten = 0;
+						if ((iFileWritten = fwrite(szPhpCode, iPhpCodeLength, 1, hFile)) != iPhpCodeLength) {
+							LG("[0x%.8x] Write file failure, %d != %d", (UINT)XxhPhpCodeHash, iFileWritten, iPhpCodeLength);
+						}
+						else {
+							LG("[0x%.8x] Sucessful stealed eval'd code '%s' %d bytes", (UINT)XxhPhpCodeHash, szOutputFilePath, iFileWritten);
+						}
+					}
+					else {
+						LG("[0x%.8x] Already stealed", (UINT)XxhPhpCodeHash);
+					}
+
+					fclose(hFile);
 				}
 				else {
-					LG("[0x%x] Sucessful write eval'd code '%s' %d bytes", szOutputFilePath, iFileWritten);
+					LG("[0x%.8x] Unable to create file", (UINT)XxhPhpCodeHash);
 				}
-			}
-			else {
-				LG("[0x%x] Already stealed", XxhPhpCodeHash);
-			}
+			} else LG("[0x%.8x] File with code already exist. '%s' %d bytes", (UINT)XxhPhpCodeHash, szOutputFilePath, iPhpCodeLength);
 
-			fclose(hFile);
+			free(szOutputFilePath);
 		}
 		else {
-			LG("[0x%x] Unable to create file", XxhPhpCodeHash);
+			LG("[0x%.8x] Is junk code", (UINT)XxhPhpCodeHash);
 		}
-
-		free(szOutputFilePath);
 	}
 
 	return fpCompileString(a1, Src, a3);
@@ -228,11 +254,8 @@ int __cdecl DetourCompileString(zval* a1, char* Src, DWORD* a3)
 
 void main()
 {
-	if (MH_Initialize() != MH_OK) {
-		LG("MH Initialize error");
-
-		ExitProcess(EXIT_FAILURE);
-	} 
+	if (MH_Initialize() != MH_OK)
+		LG("MH Initialize error"), ExitProcess(EXIT_FAILURE);
 	else {
 		LG("CompileString create hook");
 
@@ -240,23 +263,27 @@ void main()
 			ExitProcess(EXIT_FAILURE);
 		
 		while (TRUE) {
-			if (GetAsyncKeyState(VK_END) & 1) {
+			if (GetAsyncKeyState(VK_END) & 1)
 				break;
-			}
 		}
 
 		LG("CompileString remove hook & uninitialize minhook");
 
 		if (RemoveHook(dwCompileString) != 0 || MH_Uninitialize() != MH_OK)
-			ExitProcess(EXIT_FAILURE);
+			LG("Unable to remove hook or MH Uninitialize error"), ExitProcess(EXIT_FAILURE);
 
+		/* free all saved hashes */
 		plink_hash_t phCurrent = phFile;
 		while (phCurrent != NULL) {
 			plink_hash_t phBefore = phCurrent->before;
 			free(phCurrent);
 			phCurrent = phBefore;
 		}
-		
+		/* ---- */
+
+#ifdef DEBUG
+		FreeConsole();
+#endif
 		ExitProcess(EXIT_SUCCESS);
 	}
 }
@@ -268,13 +295,15 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID unk)
 		BOOL bThreadStarted = FALSE;
 
 		DisableThreadLibraryCalls(hModule);
-		
+
 #ifdef DEBUG
-		AllocConsole();
-		freopen_s(&cfile, "CONOUT$", "w", stdout);
-		if (!cfile && MessageBoxA(0, "Unable to open handle for console. Continue?", "SoulEngine Decompiler", MB_OKCANCEL | MB_ICONWARNING) == IDCANCEL) {
-			ExitProcess(EXIT_FAILURE);
+		if (AllocConsole()) {
+			freopen_s(&cfile, "CONOUT$", "w", stdout);
+			if (!cfile && MessageBoxA(0, "Unable to open file handle for console. Continue?", "SoulEngine Decompiler", MB_OKCANCEL | MB_ICONWARNING) == IDCANCEL)
+				ExitProcess(EXIT_FAILURE);
 		}
+		else if (MessageBoxA(0, "Unable to allocate console. Continue?", "SoulEngine Decompiler", MB_OKCANCEL | MB_ICONWARNING) == IDCANCEL)
+			ExitProcess(EXIT_FAILURE);
 #endif
 		HMODULE hPhpModule = GetModuleHandleA(szPhpModuleName);
 
@@ -292,7 +321,7 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID unk)
 
 		if (!bThreadStarted)
 			ExitProcess(EXIT_FAILURE);
-		
+
 		CloseHandle(hModule);
 	}
 
